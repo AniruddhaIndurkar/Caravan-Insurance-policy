@@ -1,0 +1,761 @@
+---
+title: "Choosing and Explaining Likely Caravan Insurance Customers"
+output:
+  pdf_document:
+    number_sections: true
+    toc: yes
+    highlight: tango
+    keep_tex: true
+    includes:
+      in_header: styles.sty
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r echo=FALSE, message=FALSE}
+#put all the r libraries used in the submission here
+library(MASS)
+library(ISLR)
+library(boot)
+library(pROC)
+library(glmnet)
+```
+
+\section*{Author information}
+\begin{center}
+\renewcommand{\arraystretch}{1.5}
+\begin{tabular}{L{2.5cm}|L{8.5cm}}
+ Family Name & Indurkar\\\hline 
+ Given Name & Aniruddha\\\hline  
+ Student Email & aniruddha.indurkar.7@gmail.com\\ 
+\end{tabular}
+\renewcommand{\arraystretch}{1}
+
+\end{center}
+
+
+\newpage
+\section{Introduction}
+
+"ticdata2000.txt" and "ticeval2000.txt" contain data related to car insurance policy, in particular binary response (0 and 1) for policy holders. We make use of the data to find a set of 800 customers that contain the most caravan policy. Furthermore, we apply EDA and statistics to give details about our model.
+
+```{r cars, message=FALSE, warning=FALSE}
+## Loading the required libraries
+library(ggplot2)
+library(dplyr)
+library(data.table)
+library(gridExtra)
+library(glmnet)
+library(boot)
+```
+
+\section{Data Exploration}
+
+Reading the data :
+
+```{r pressure, echo=FALSE}
+### Reading the data
+car.data.train=read.csv("ticdata2000.txt",sep="\t",header = F)
+car.data.test=read.csv("ticeval2000.txt",sep="\t",header = F)
+car.data.target=read.csv("tictgts2000.txt",sep="\t",header = F)
+headers=read.csv(file = "Book1.csv")
+headers=as.data.table(headers)
+# Making use of data.table package
+car.data.train=as.data.table(car.data.train)
+car.data.test=as.data.table(car.data.test)
+car.data.target=as.data.table(car.data.target)
+
+# Importing header names of the columns
+headernames=headers[,tstrsplit(headers$Nr.Name.Description.Domain, ' ')]
+names(car.data.train)<-headernames$V2  
+
+# Renaming the column headers
+names(car.data.train)<-headernames$V2  
+names(car.data.test)<-headernames$V2[1:85]
+names(car.data.target)<-"CARAVAN"
+```
+
+After reading the data, we try to look at our data and see what follows:
+```{r structure and summary of data}
+head(str(car.data.train))
+head(car.data.train)
+
+head(summary(car.data.train))
+
+# Checking the data for classifying into numerical or factor features
+# Unique levels in the data
+head(apply(car.data.train, 2, function(x) unique(x)))
+```
+
+- On looking at the data we can clearly see that almost all the varibles are categorical.
+- However, we need to take into consideration ordinal variables. Because, if we convert the ordinal variables into factors then we will lose out on the information that these ordinal variables will contain.
+- We perform exploratory analysis on the variables.
+
+```{r Plotting the variables}
+ggplot(car.data.train)+
+  aes(x=MOSTYPE,fill=as.factor(car.data.train$CARAVAN))+geom_bar()+
+  scale_fill_manual(values=c("light green","blue"))+
+  guides(fill=guide_legend(title="Caravan"))
+```
+
+```{r Plotting the variables 2 }
+ggplot(car.data.train[car.data.train$CARAVAN==1,])+
+  aes(x=MOSTYPE)+geom_bar()+
+  scale_fill_manual(values=c("light green","blue"))+
+  guides(fill=guide_legend(title="Caravan"))
+```
+
+*Observations from the graph*
+
+- The important observation is that some of the customer sub-types have not brought any policies.
+- However, we can only confirm this after our Data model predicts the important features. Exploratory data analysis only gives us the idea about the trends in the data but we cannot say anything without a proper investigation using a data model.
+
+```{r Customer subtype plot}
+ggplot(car.data.train)+
+  aes(x=MOSTYPE,fill=as.factor(car.data.train$CARAVAN))+
+  geom_bar(position="fill")+
+  scale_fill_manual(values=c("light green","blue"))+
+  guides(fill=guide_legend(title="Caravan"))+
+  ylab("Percentage")
+```
+
+
+- We plot custoner subtype and observe that it is the categorical data which is coherent with the information in the data dictionary.
+- Similarly, after observing the columns 1:36(Customer subtype- Private health insurance), we can safely say that the variables are categorical 
+
+```{r plot of years and count}
+# According to the data dictionary
+Scalex=c("20-30","30-40","40-50","50-60","60-70","70-80")
+
+ggplot(car.data.train)+
+  aes(x=as.factor(MGEMLEEF),fill=as.factor(car.data.train$CARAVAN))+
+  geom_bar()+
+  scale_fill_manual(values=c("light green","blue"))+
+  guides(fill=guide_legend(title="Caravan"))+
+  scale_x_discrete(labels= Scalex)+xlab("years")
+
+ggplot(car.data.train[car.data.train$CARAVAN==1,])+
+  aes(x=as.factor(MGEMLEEF))+
+  geom_bar()+
+  scale_fill_manual(values=c("light green","blue"))+
+  guides(fill=guide_legend(title="Caravan"))+
+  scale_x_discrete(labels= Scalex)+xlab("years")
+```
+*Observations from the graph*
+
+- The above graph shows that there are some variables which are ordinal and are binned. In this case, the binned categories are having an order and we can thus classify them as ordinal.
+
+We further continue to explore the variables in the given data and decide the variables that we do not need to convert to factors.
+
+- Further analysing the variables shows us that all the rest of the variables are ordinal and contain information in the order and hence we keep them as numeric in order to extract meaningful information from them.
+
+```{r Moped Insurance}
+
+p1<-ggplot(car.data.train)+
+  aes(x=as.factor(ABROM),fill=as.factor(car.data.train$CARAVAN))+geom_bar()+
+  scale_fill_manual(values=c("light green","blue"))+
+  xlab("Number of moped insurance policies")+
+  guides(fill=guide_legend(title="Caravan"))
+
+p2<-ggplot(car.data.train)+
+  aes(x=as.factor(PBROM),fill=as.factor(car.data.train$CARAVAN))+
+  geom_bar()+
+  scale_fill_manual(values=c("light green","blue"))+
+  xlab("Contribution to moped policies")+
+  guides(fill=guide_legend(title="Caravan"))
+
+grid.arrange(p1,p2)
+```
+
+*Observation from the data dictionary*
+
+- The data dictionary for the above features states that:
+1. PBROM: Contribution moped policies
+2. ABROM: Number of moped policies
+
+- We expect from the above information that the contribution to moped policies should be high if we have high number of moped insurance policies
+
+We try to confirm our assumption by checking the correlation between the two variables.
+```{r Correlation}
+cor(car.data.train$ABROM,car.data.train$PBROM)
+
+```
+
+We observe a high correlation between the two variables. Thus, we might be able to reduce a few variables using this information.
+Similarly, we try to check this for all the other features with similar definitions provided in the data dictionary.
+
+```{r Significant correlation}
+# Table containing values of correlation coefficients
+cor_df<-as.data.frame.table(cor(as.data.frame(car.data.train[,37:85])))
+
+# Check when the correlation coefficients with threshold set to 0.90
+cor_df[cor_df$Var1!=cor_df$Var2 & (cor_df$Freq>0.85|cor_df$Freq<(-0.85)),]
+
+# We set a limit of 0.85 to filter out the relevant values
+sig_cor<-cor_df[cor_df$Var1!=cor_df$Var2 & (cor_df$Freq>0.85|cor_df$Freq<(-0.85)),]
+```
+
+* Thus, out of the 42 product ownership features we see that half of them are highly correlated and make use of this information to proceed by taking into account this information while building our model.*
+
+### Inspection of socio-demographic attributes
+
+Since, we have predictors as well as response as categorical we make use of chi squared test to check which response variables are significant.
+
+Checking the response variable with the predictor has a drawback of choosing biased features only relevant to training data set.
+
+- a chi-square test is typically used for testing association between categorical variables.Here, the response and the predictors are both categorical.
+
+- We split the training data into k-folds and check the chi squared value for every variable. However, we do not rely on this information but take into account in order to subset a few features and compare with different models that we prepare.
+
+- Here, we are checking the variables with the response it will induce bias and it will be wrong, hence we perform cross-validation and then select the features in order to reduce the bias 
+
+```{r Cross validaiton ,message=FALSE, warning=FALSE, include=FALSE}
+### The below code is taken from Wine taste prediction code provided in Moodle
+set.seed(10)
+## use a function to calculate the fold
+fold <- function(d, k = 10) {
+  
+  # The number of rows in *d*.
+  r <- nrow(d)
+  
+  # The number of rows per fold.
+  n <- r %/% k
+  
+  # Minimally "over-sample" from the values 1 to *k*,
+  # by "shuffling" *n* + 1 repetitions of the values 1 to *k*,
+  # and "take" *r* values (to account for an uneven division of *r*).
+  id <- sample(rep(1:k, n + 1))[1:r]
+  
+  return(id)
+}
+
+# Use the car train data
+d<-car.data.train
+d<-as.data.table(d)
+id=fold(d,10)
+parameters=list()
+
+# Perform k-fold cross validation
+for (b in 1:10) {
+  
+  # Define the training set.
+  tr <- d[b != id, ]
+  
+  # Define the test set.
+  te <- d[b == id, ]
+  
+  j=1
+  pvalue=c()
+  attr_Chi<-c()
+  for (i in colnames(tr[,1:36])){
+    x=c()
+    
+    
+    x[j]=paste("tr",sep="$",i)
+    z=eval(parse(text=x[j]))
+    
+    ## perform the chi-square test
+    p=chisq.test(x=z,y=tr$CARAVAN)
+    attr_Chi[j]=p$statistic
+    
+    ### We take the pvalue for the significance of the variables
+    pvalue[j]=p$p.value
+    j=j+1
+  }
+  
+  Chisqvalues=as.data.frame(cbind(pvalue,attr_Chi,colnames(car.data.train[,1:36])))
+  Chisqvalues$pvalue<-as.numeric(as.character(Chisqvalues$pvalue))
+  Chisqvalues$attr_Chi<-as.numeric(as.character(Chisqvalues$attr_Chi))
+  Chisqvalues<-Chisqvalues[Chisqvalues$pvalue<0.01,]
+  Chisqvalues$V3<-as.character(Chisqvalues$V3)
+
+  h<-list()
+  h<-list(Chisqvalues$V3)
+  
+  ## Check the parameters common in every fold
+  parameters[b]=h
+}
+
+## Output of parameters from validation
+parameters
+```
+
+- The p value <0.01 of the above features indicate that they have significant relation between the response.
+
+- We reject the null hypothesis that the chi squared test makes that there is no relation between the 2 variables.
+
+- Thus, the chi squared value indicates that these features are not independent.
+
+- We filter out the features using the p-values and find the relevant features.
+
+- Since, we have checked after cross validation that the same number of features have significant association, we choose these features and proceed.
+
+- We take the first list in order to not miss out on any relevant features in our subset.
+
+- Now from the subset of features that we found out above we proceed ahead with our classification model.
+
+```{r Numeric variables}
+numer<-c(as.character(sig_cor[1:21,1]))
+## Variables subsetted after EDA
+subset_var<-c(c(numer[1:21]),unlist(parameters[1],use.names=F),
+              colnames(car.data.train[,37:42]),"CARAVAN")
+
+# Create a subset of the data
+car.train.subset<-car.data.train[,colnames(car.data.train) %in% subset_var,with=F]
+```
+
+\section{Model Development}
+
+- Since we are classifying the caravan insurance policy holders using our data, we use classification technique to model.
+
+- The available techniques we have for classification are naive bayes, KNN- classifier, Random Forest classifier, LDA, QDA and logistic regression.
+
+- Along with the classification we are also required to generate a boundary probability. 
+
+According to the given problem and the available methods for classification we discuss the pros and cons of each method in order to justify the model selection.
+
+- Since, we are classifying the data along with predicting the boundary probability we cannot use K-nearest neighbours and naive bayes method as it would be difficult to obtain the boundary probabilities.
+
+- Random forest algorithms in this case would be difficult to interpret and it has slow real time prediction. Furthermore, since the data contains a lot of correlated features hence, Random forrests will favour the smaller groups than the larger groups.*James, G., Witten, D., Hastie, T., Tibshirani, R. (2015)*
+
+- Logistic Regression: It is the primary method we rely on to generate the probabilities because it does not make assumptions about the distribution of features.*Maja Pohar, Mateja Blas, Sandra Turk (2004).* We expect Logistic regression to perform better but using Logit method when we have discrete variables is not correct and expect the model to be simplified and interpretable
+
+- Linear Discriminant Analysis: We make use of LDA because the classes are well seperated. Also, the model for LDA is expected to be more stable having a low variance.However, this model suffers with an assumption that the variables are independent and normally distributed *James, G., Witten, D., Hastie, T., Tibshirani, R. (2015)*. In our exploratory data analysis we saw that the variables are discrete and making any assumption about these features may result in inaccuracies. The individual features do not have one dimensional normal distribution.
+
+- Quadratic discriminant Analysis: It makes the same assumption as the LDA but it has a different covariance matrix for different features.*James, G., Witten, D., Hastie, T., Tibshirani, R. (2015)* However, the assumption that the variables are normally distributed remains.
+
+- We proceed with Logistic regression and Linear/ Quadratic Discriminant analysis.
+
+- We go for k-fold cross validation in-order to minimize the bias.
+
+## Logistic regression
+
+Logistic regression can be implemented by using the stepwise selection, best subset selection, Lasso and Ridge regression for feature selection. We choose different models because stepwise selection has been known to induce bias in selecting the features as the features being selected are based on single hypothesis being tested using F-statistic test. 
+Another problem associated with stepwise selection is that order variable selection is important.*James, G., Witten, D., Hastie, T., Tibshirani, R. (2015)* In order to try and eliminate this, we also consider backward selection using the subset features detected in the EDA.
+
+We include lasso regularisation because, it is prone to low bias during selection because of the shrinkage parameter. While deciding between L1 and L2 regularisation we choose Lasso because, the number of features are large. Ridge regression will include and increase the accuracy but will have a tendency to overfit. Also, the coefficients in ridge regression will not be zero leading to features that are not important to be still in the final model. Furthermore, the lasso model is more interpretable.*James, G., Witten, D., Hastie, T., Tibshirani, R. (2015)*
+
+We take into account 5 models in logistic regression:
+1. Stepwise forward model using AIC
+2. Stepwise backward selection model using AIC
+3. Stepwise backward mode using BIC
+4. Subset model with backward selection using BIC
+5. Lasso regularisation of the model with all parameters
+
+We observe the parameters obtained from the model and then decide our model on comparing different models.
+
+1. Applying forward stepwise selection using AIC
+
+```{r Stepwise forward AIC ,message=FALSE, warning=FALSE, include=FALSE}
+# Formula for scope
+all<-formula(glm(CARAVAN~.,car.data.train,family="binomial"))
+
+# Logistic regression model
+glm.f.AIC<-glm(CARAVAN~1,data=car.data.train,family="binomial")
+
+# Logistic model regression
+glm.f.AIC.step<-step(glm.f.AIC,direction="forward",scope=all)
+```
+
+```{r model 1}
+summary(glm.f.AIC.step)
+```
+
+
+2. Applying backward stepwise selection using AIC
+```{r Stepwise backward AIC, include=FALSE,  eval=FALSE}
+
+glm.b.AIC<-glm(CARAVAN~.,data=car.data.train,family="binomial")
+
+glm.b.AIC.step<-step(glm.b.AIC,direction="backward",scope=all)
+```
+- We get the same model using backward selection as the one we get using forward selection. Hence, we only consider the model of forward selection.
+
+3. Forward stepwise selection using BIC
+
+```{r Stepwise forward selection BIC,include=FALSE}
+all<-formula(glm(CARAVAN~.,car.data.train,family="binomial"))
+
+# Logistic regression model
+glm.f.BIC<-glm(CARAVAN~1,data=car.data.train,family="binomial")
+
+# Logistic model regression with BIC
+glm.f.BIC.step<-step(glm.f.BIC,direction="forward",scope=all,
+                     k=log(nrow(car.data.train)))
+```
+
+- Since the BIC criterion places heavier penalty on the model, we have lower sets of variables from the stepwise selection using AIC.
+```{r model 2}
+summary(glm.f.BIC.step)
+```
+
+4. Stepwise backward selection using random subset
+```{r Stepwise backward selection using random subset, message=FALSE, warning=FALSE, include=FALSE}
+# Formula for random subset as the starting point
+f<-paste("CARAVAN", paste(subset_var[1:45], collapse = " + "),
+      sep = " ~ ")
+
+# Backward selection using random subset selection
+glm.b.sub<-glm(f,data=car.data.train,family="binomial")
+
+
+glm.b.AIC.sub<-step(glm.b.sub,direction="backward")
+
+```
+
+Here, we observe that the model using features handpicked after exploratory data analysis also give us a different model.
+```{r model 3}
+summary(glm.b.AIC.sub)
+```
+
+5. Lasso 
+```{r Lasso}
+## The below code is taken from Wine taste prediction code provided in Moodle
+
+# Sample training and test for cross validation
+ind <- sample(2,nrow(car.data.train), replace=TRUE
+              , prob=c(0.7,0.3))
+
+ctr<-car.data.train[ind==1,]
+cte<-car.data.train[ind==2,]
+
+car_tr <- model.matrix(CARAVAN ~ ., ctr)[ , -1]
+
+# Define a model matrix for the test set (remove the intercept: redundant).
+car_te <- model.matrix(CARAVAN ~ ., cte)[,-1]
+
+a <- -5
+b <-  5
+n <- 100
+s <- seq(a, b, (b - a) / n)
+g <- 10^s
+
+set.seed(1)
+
+# Cross-validate lambda for the L1 shrinkage penalty,
+# for a logistic regression model, for the training set,
+# optimising (maximising) the average AUC value.
+library(glmnet)
+m_L1_xv <- cv.glmnet(car_tr, ctr$CARAVAN, alpha = 1, lambda = g, family = "binomial",
+                     type.measure = "auc")
+
+plot(m_L1_xv)
+title(bquote(atop(bold("Av. AUC by Lambda (Log)")), ""))
+
+lambda_L1 <- m_L1_xv$lambda.1se
+```
+
+- We choose the optimal value of Lambda corresponding to one standard error from maximum AUC value.
+
+
+```{r Plotting Lambda}
+# Plot coefficient magnitude by lambda value (log).
+m_temp_L1 <- glmnet(car_tr, ctr$CARAVAN, alpha = 1, 
+                    family = "binomial", lower = -25)
+plot(m_temp_L1, xvar = "lambda")
+title(bquote(atop(bold("Coefficients by Lambda (Log)"), "")))
+
+```
+
+```{r Coefficients of Lasso}
+co_L1_xv <- cbind(coef(m_L1_xv, "lambda.min")[ , 1],
+                  coef(m_L1_xv, "lambda.1se")[ , 1])[-1, ]
+co_L1_xv <- co_L1_xv[order(abs(co_L1_xv[ , 1]), decreasing = TRUE), ]
+colnames(co_L1_xv) <- c("Max. AUC", "1-SE")
+round(co_L1_xv, 4)[1:40,]
+```
+
+Clearly, Lasso gives us the parameters that fit the model and punishes the features that are less important. Thus, the features not relevant to the model have coefficient of zero.
+
+Hence, we use these features to proceed ahead and fit our LDA and QDA model along with the features that we found common in all the other models of logistic regression 
+
+6. Ridge Regression
+```{r Ridge Regression}
+
+# Cross-validate lambda for the L1 shrinkage penalty,
+# for a logistic regression model, for the training set,
+# optimising (maximising) the average AUC value.
+library(glmnet)
+m_L2_xv <- cv.glmnet(car_tr, ctr$CARAVAN, alpha = 0, lambda = g, family = "binomial",
+                     type.measure = "auc")
+
+plot(m_L2_xv)
+title(bquote(atop(bold("Av. AUC by Lambda (Log)")), ""))
+
+lambda_L2 <- m_L2_xv$lambda.1se
+```
+We choose the optimal value of lambda for Regressing which is one standard error away from the maximum AUC.
+
+```{r Plot lambda for Ridge regression}
+# Plot coefficient magnitude by lambda value (log).
+m_temp_L2 <- glmnet(car_tr, ctr$CARAVAN, alpha = 0, family = "binomial", lower = -25)
+plot(m_temp_L2, xvar = "lambda")
+title(bquote(atop(bold("Coefficients by Lambda (Log)"), "")))
+
+```
+
+```{r Coefficients of Ridge regression}
+co_L2_xv <- cbind(coef(m_L2_xv, "lambda.min")[ , 1],
+                  coef(m_L2_xv, "lambda.1se")[ , 1])[-1, ]
+co_L2_xv <- co_L2_xv[order(abs(co_L2_xv[ , 1]), decreasing = TRUE), ]
+colnames(co_L2_xv) <- c("Max. AUC", "1-SE")
+round(co_L2_xv, 4)[1:40,]
+```
+
+## Linear Discriminant Analysis
+
+For LDA, we use the features common in Lasso model as all the variables are not relevant.
+The assumptions made by LDA are:
+
+- Features are drawn from a multivariate gaussian distribution.
+
+- Each feature has its own covariance matrix and a mean vector.
+
+- Since the number of parametes is low as compared to the data available we expect less overfitting.
+
+```{r LDA fit}
+# We take the variables from the Lasso model and some features that are common to every logistic model
+vars<-c("APLEZIER","PWAPART","PPERSAUT","MAUT1","MOPLHOOG",
+        "MKOOPKLA","MOPLLAAG","MRELGE","MBERMIDD","MINKGEM")
+form<-paste("CARAVAN", paste(c(vars), collapse = " + "),
+                       sep = " ~ ")
+lda.fit.lass.feat<-lda(formula(form),car.data.train)
+
+```
+
+
+## Quadratic Discriminant Analysis
+
+For QDA, we use the features common in Lasso model as all the variables are not relevant.
+The assumptions made by QDA are:
+
+- Features are drawn from a multivariate gaussian distribution.
+
+- The features have a common covariance matrix.
+
+```{r QDA}
+
+form<-paste("CARAVAN", paste(c(vars), collapse = " + "),
+                       sep = " ~ ")
+
+
+qda.fit.lass.feat<-qda(formula(form),car.data.train,method="mle")
+```
+
+
+\section{Model Comparison}
+
+Lasso model:
+
+The proportion of deviance explained by the model corresponds to a p value of the model which is effectively zero.
+
+```{r P value Lasso}
+m_L1 <- glmnet(car_tr, ctr$CARAVAN, alpha = 1, lambda = lambda_L1, family = "binomial")
+
+## P-value of the lasso regression fit
+1 - pchisq(m_L1$dev.ratio * m_L1$nulldev, m_L1$df)
+```
+
+
+```{r P value Ridge}
+m_L2 <- glmnet(car_tr, ctr$CARAVAN, alpha = 0, lambda = lambda_L2, family = "binomial")
+
+## P-value of the lasso regression fit
+1 - pchisq(m_L2$dev.ratio * m_L2$nulldev, m_L2$df)
+
+```
+ 
+ *We observe that the p-value is not less than 0.01, hence, the ridge regression model is not significant.*
+ 
+ 
+Accuracy and the performance of Lasso:
+```{r Performance of Lasso}
+
+car.data.test1 <- model.matrix(CARAVAN ~ ., cbind(car.data.test,car.data.target))[ , -1]
+
+p4 <- predict(m_L1, car.data.test1, type = "response")
+r4 <- roc(as.vector(car.data.target$CARAVAN), as.vector(p4))
+
+
+```
+
+- Another important problem was to optimise the probability threshold for the model in order to obtain balance between sensitivity and specificity.
+
+- The data provided to us has severe imbalance between the customers who have bought the insurance policy (348 rows in train data) and those who have not. The models generally optimise accuracy, leading to great sensitivity but poor specificity.
+
+- A common technique to evaluate a candidate threshold is see how close it is to the perfect model where sensitivity and specificity are one *Max Kuhn, (2014)*
+
+- We make use of the coords function to find the probability threshold first and check the accuracy and recall in order to decide the threshold.
+
+
+```{r Threshold probabiity}
+coords(r4,"best",ret="threshold")
+```
+
+However, this threshold value obtained has a very low accuracy, we tinker the values around this threshold and obtain the approximate threshold.
+```{r Tinkering with the threshold}
+
+table(ifelse(p4 > 0.0718, "good", "bad"), car.data.target$CARAVAN) #low accuracy but high recall
+```
+
+```{r Accuracy of Lasso}
+a4<-table(ifelse(p4 > 0.145, "good", "bad"), car.data.target$CARAVAN)
+# We proceed with the threhold of 0.095 as it has 
+paste0("Accuracy: ",sum(diag(a4))*100/4000) # Accuracy
+paste0("Recall: ",a4[2,2]/sum(a4[,2]))# Recall
+pROC::auc(r4)
+
+```
+
+
+```{r LDA model accuracy}
+# LDA model
+p6 <- predict(lda.fit.lass.feat, car.data.test)
+
+r6 <- roc(as.vector(car.data.target$CARAVAN), as.numeric(p6$posterior[,1]))
+plot(r6)
+pROC::auc(r6)
+
+table(p6$class, car.data.target$CARAVAN)
+
+```
+We observe the AUC to be very similar to logistic model that we obtained
+
+```{r QDA model accuracy}
+# QDA model
+
+p8 <- predict(qda.fit.lass.feat, car.data.test)
+
+r8 <- roc(as.vector(car.data.target$CARAVAN), as.numeric(p8$posterior[,1]))
+plot(r8)
+pROC::auc(r8)
+
+table(p8$class, car.data.target$CARAVAN)
+
+```
+
+Comparison of the various models:
+
+
+```{r Comparing ROC plots}
+par(mfrow = c(2,2))
+
+plot(r4)
+title(main = "Lasso fit logistic model", font.main = 1)
+text(1,0.8, paste0("AUC: ", round(pROC::auc(r4), 6)))
+plot(r6)
+title(main = "LDA", font.main = 1)
+text(1,0.8, paste0("AUC: ", round(pROC::auc(r6), 6)))
+plot(r8)
+title(main = "QDA ", font.main = 1)
+text(1,0.8, paste0("AUC: ", round(pROC::auc(r8), 6)))
+
+```
+- From the above graphs we can clearly see that the Area under the curve for Lasso fit is more than LDA and QDA. For, better the AUC the better the classifier.
+- Also, the accuracy of Logistic model is more than the LDA and QDA.
+
+- As we have already mentioned the assumptions of LDA and QDA, we expect these methods to be slightly inaccuracte due to these assumptions.Generally, LDA and QDA errors are primarily due to errors in estimation of mean variance of the sample. However, as we see in the data apart from socio-demographic attributes the product ownership attributes are binned and ordinal. After visualising, we still are skeptical as to whether these ordinal variables which appear to be binned from numerical variables such as income follow a normal distribution or not. 
+
+- Classification error is a measure of comparison between Logistic and LDA/QDA, however, it is insensitive and statistically inefficient measure *(Maja Pohar, Mateja Blas, Sandra Turk (2004))* . But we still continue with this comparison as it is simple and interpretable.
+
+
+There is a clear classification boundary in LDA and QDA model as can be seen from the below histograms.
+
+```{r LDA histogram}
+ldahist(p6$x[,1], g= p6$class)
+```
+We see a clear demarcation between the classes in LDA. Yet, we are skeptical about accepting the model due to its initial assumptions regarding the feature.
+
+## Final Model:
+
+Thus, after comparing various models with the accuracy and AUC observed for classification we propose the logistic model with Lasso regularisation.
+
+- We tried to incorporate any measures relevant to the dataset by comparing various models in logistic regression model.
+
+- Comparing the Ridge regression and lasso regression fit we found Lasso as more significant model. This may be due to the fact that not all the features are relevant to the model and Lasso regression shrinks the irrelevant parameters to zero.
+
+- Comparison between LDA/QDA showed that Logistic regression performed better . We attribute this to the fact of the underlying assumptions made by QDA/LDA that the features are independent and normally distributed.
+
+\section{Variable Identification and Explanation}
+
+The variables identified by the Lasso model are given below:
+```{r Interpreting coefficients}
+round(co_L1_xv, 4)
+```
+For the first 20 variables identified by lasso, we see that odds for classification whether the customer will buy the policy or not:
+1. Are increased by a factor of $e^{0.8326}$ for 1 unit increase in number of boat policies
+
+
+Thus, we see the comparison from the above given table and observe that only few of the features are responsible for the insurance policies.
+
+```{r Top 3 varaibles: 1}
+ggplot(car.data.train)+
+  aes(x=as.factor(APLEZIER),fill=as.factor(car.data.train$CARAVAN))+
+  geom_bar()+
+  scale_fill_manual(values=c("light green","blue"))+
+  xlab("Number of boat insurance policies")+
+  guides(fill=guide_legend(title="Caravan"))
+```
+2. Are decreased by a factor of $e^{-0.0013}$ for 1 unit increase in lower level of education
+
+```{r Top 3 varaibles: 2}
+ggplot(car.data.train)+
+  aes(x=as.factor(MOPLLAAG),fill=as.factor(car.data.train$CARAVAN))+
+  geom_bar()+
+  scale_fill_manual(values=c("light green","blue"))+
+  xlab("Lower level education")+
+  guides(fill=guide_legend(title="Caravan"))
+```
+
+
+3. Are increased by a factor of $e^{0.0831}$ for 1 unit increase in contribution to the car policies
+```{r Top 3 varaibles: 3}
+ggplot(car.data.train)+
+  aes(x=as.factor(MOPLLAAG),fill=as.factor(car.data.train$CARAVAN))+
+  geom_bar()+
+  scale_fill_manual(values=c("light green","blue"))+
+  xlab("Contribution to car policies")+
+  guides(fill=guide_legend(title="Caravan"))
+```
+
+* Our model confirms the fact that highly correlated variables that were observed in data analysis did not feature in our model.*
+
+
+## Final prediction of the accuracy using the Lasso model
+
+```{r Final prediction and the required accuracy}
+car.data.target[,Probability:=predict(m_L1, car.data.test1, type = "response")]
+
+nrow(car.data.target[order(Probability,CARAVAN,decreasing=T)][1:800,][CARAVAN==1])
+```
+
+**Thus, our model was able to predict the 106 out of top 800 CARAVAN policies correctly. Thus, the hit rate of model is 13.5 %.**
+
+
+\section{Conclusion}
+
+- Even though the logistic model is performing well, it is oversimplified. The real function or the model will be complex and thus may induce bias in the data set. Thus, the performance of the real model may be underestimated in this case.
+
+- The model shows that product ownership attributes are more relevant to the data than socio-demographic attributes. Also, highly correlated features observed in EDA did not feature in our model confirming our presumptions.
+
+- Lasso performed better than ridge regression and was a significant model due to the fact that ridge regression takes into account all the features but does not shrink the coefficient to zero. Since, not all features are relevant , we attribute this reason for the failure of ridge regression.
+
+- LDA/QDA methods were expected to not perform better than logistic due to their underlying assumption which was proved after comparing the model.
+
+- Out of the top 800 probabilities generated using the Lasso model 106 people actually bought the caravan policy.
+
+- The accuracy of the Lasso model was established as 92.875% and a recall of 10.9% after a tradeoff between accuracy and recall using the probability threshold of 0.145
+
+\section{References}
+
+* James, G., Witten, D., Hastie, T., Tibshirani, R. (2015). *An Introduction to Statistical Learning with Applications in R*.<br>Retrieved from: http://www-bcf.usc.edu/~gareth/ISL/
+* Max Kuhn, (2014) *Optimizing Probability Thresholds for Class Imbalances*.<br> Retrieved from: https://www.r-bloggers.com/optimizing-probability-thresholds-for-class-imbalances/
+* Maja Pohar, Mateja Blas, Sandra Turk (2004). *Comparison of Logistic Regression and Linear Discriminant Analysis: A Simulation Study* .<br> Retrieved from: https://www.researchgate.net/publication/229021894_Comparison_of_Logistic_Regression_and_Linear_Discriminant_Analysis_A_Simulation_Study
+* Jurgen A. Doornik,Steve Moyle (2017) *LOGIT Modelling* <br> Retrieved from: https://www.kaggle.com/uciml/caravan-insurance-challenge/kernels
+
+
+
+
